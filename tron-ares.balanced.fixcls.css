@@ -2366,3 +2366,13 @@ html{ scrollbar-gutter: stable; }
 .showcase-cat{font-size:11px;opacity:.7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 .showcase-empty{opacity:.8;font-size:13px;padding:18px;border:1px dashed rgba(255,255,255,.18);border-radius:16px}
+/* Row côte à côte */
+#showcaseButtonsRow{
+  display:flex;
+  gap:8px;
+  align-items:center;
+}
+#showcaseButtonsRow .sidebar-btn{
+  flex:1 1 0;
+  min-width:0;
+}
