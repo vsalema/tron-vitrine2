@@ -82,19 +82,17 @@
 
   <button id="radioPlayBtn" class="mini-radio-btn" data-luna-url="https://vsalema.github.io/luna/">▶</button>
 </div>
-
-  
-
-
-<!-- 🎥 Actions Films (uniquement dans channelList) -->
+<!-- 🎥 Actions Films (visibles uniquement sur l'onglet Films) -->
 <div class="films-actions-row" id="filmsActionsRow">
   <div id="newAdditionsContainer" class="action-slot hidden">
-    <button id="newAdditionsBtn">🆕 Derniers ajouts</button>
+    <button id="newAdditionsBtn" class="btn btn-accent" type="button">🆕 Derniers ajouts</button>
   </div>
   <div id="showcaseContainer" class="action-slot hidden">
-    <button id="showcaseBtn" class="btn btn-ghost">🎞️ Vitrine</button>
+    <button id="showcaseBtn" class="btn btn-ghost" type="button" title="Ouvrir la vitrine">🎞️ Vitrine</button>
   </div>
 </div>
+
+  
     <div class="lists-container">
   <div class="scroll-fade"></div>
 
@@ -210,21 +208,14 @@
           <iframe id="iframeEl" allowfullscreen></iframe>
         </div>
 
-        <!-- 🎞️ Vitrine (overlay dans le player) -->
+        <!-- 🎞️ VITRINE (overlay inside player, same dimensions) -->
         <div id="showcaseOverlay" class="showcase-overlay hidden" aria-hidden="true">
           <div class="showcase-topbar">
-            <div class="showcase-searchbar">
-              <div class="search-wrapper" id="showcaseSearchWrap">
-                <input id="showcaseSearchInput" class="input search-input" placeholder="Rechercher un film…" />
-                <button id="showcaseSearchClear" class="clear-search-btn" title="Effacer">×</button>
-              </div>
-            </div>
-            <button id="showcaseCloseBtn" class="showcase-close" title="Fermer">✕</button>
+            <input id="showcaseSearchInput" class="showcase-search" type="text" placeholder="Rechercher dans la vitrine…" autocomplete="off" spellcheck="false" />
+            <button id="showcaseCloseBtn" class="showcase-close" type="button" title="Fermer">✕</button>
           </div>
-
-          <div class="showcase-body" id="showcaseBody"></div>
+          <div id="showcaseBody" class="showcase-body"></div>
         </div>
-
       </div>
     </section>
 <!-- RADIO FULLSCREEN INSIDE PLAYER -->
