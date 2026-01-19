@@ -3935,7 +3935,7 @@ document.addEventListener('click', () => closeAllTrackMenus());
 // =====================================================
 
 // URLs playlists (identiques à l'init)
-const MAIN_PLAYLIST_URL = "https://vsalema.github.io/tvpt4/css/playlist-tron.m3u";
+const MAIN_PLAYLIST_URL = "https://vsalema.github.io/tvpt4/css/playlist-tron_tmdb.m3u";
 const FR_PLAYLIST_URL   = "https://vsalema.github.io/tvpt4/css/playlist-tvf-r.m3u";
 
 // ⏱️ Auto-refresh: change la valeur si tu veux (en ms)
