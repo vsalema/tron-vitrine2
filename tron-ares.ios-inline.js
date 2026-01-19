@@ -2055,6 +2055,354 @@ async function openTrailerFromEntry(entry, btnEl) {
     if (btnEl) { btnEl.disabled = false; }
   }
 }
+// =====================================================
+// SYNOPSIS (TMDb) — Films (channelList uniquement) — ouverture AU CLIC sur le titre
+// =====================================================
+// Objectif UX : éviter le hover (mobile), ne pas impacter la hauteur des items.
+// Le synopsis s'affiche dans un petit modal/overlay réutilisable.
+
+const __tmdbSynopsisCache = new Map(); // key "title|year|lang" -> { ok:boolean, data?:object, at:number, info?:string }
+let __tmdbSynopsisModalEl = null;
+let __tmdbSynopsisBackdropEl = null;
+let __tmdbSynopsisBusyKey = '';
+
+function __ensureSynopsisModal() {
+  if (__tmdbSynopsisModalEl && __tmdbSynopsisBackdropEl) return;
+
+  // Backdrop
+  const bd = document.createElement('div');
+  bd.id = 'tmdbSynopsisBackdrop';
+  bd.style.cssText = [
+    'position:fixed',
+    'inset:0',
+    'background:rgba(0,0,0,.58)',
+    'backdrop-filter:blur(2px)',
+    'z-index:999999',
+    'display:none'
+  ].join(';');
+
+  // Modal
+  const modal = document.createElement('div');
+  modal.id = 'tmdbSynopsisModal';
+  modal.style.cssText = [
+    'position:fixed',
+    'left:50%',
+    'top:50%',
+    'transform:translate(-50%,-50%)',
+    'width:min(420px, calc(100vw - 28px))',
+    'max-height:min(70vh, 560px)',
+    'overflow:auto',
+    'background:rgba(12,14,18,.96)',
+    'border:1px solid rgba(255,255,255,.10)',
+    'border-radius:16px',
+    'box-shadow:0 18px 55px rgba(0,0,0,.55)',
+    'z-index:1000000',
+    'display:none'
+  ].join(';');
+
+  modal.innerHTML = (
+    '<div style="display:flex;align-items:flex-start;gap:12px;padding:14px 14px 10px;">' +
+      '<div id="tmdbSynPoster" style="width:72px;min-width:72px;height:108px;border-radius:10px;overflow:hidden;background:rgba(255,255,255,.06);display:none;"></div>' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">' +
+          '<div style="min-width:0;">' +
+            '<div id="tmdbSynTitle" style="font-weight:900;font-size:14px;line-height:1.2;letter-spacing:.01em;word-break:break-word;"></div>' +
+            '<div id=\"tmdbSynMeta\" style=\"margin-top:6px;font-size:12px;opacity:.85;line-height:1.2;\"></div>' +'<div style=\"margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;\">' +'<button id=\"tmdbSynPlay\" type=\"button\" title=\"Voir le film\" style=\"padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.10);color:#fff;font-weight:800;font-size:12px;cursor:pointer;\">▶ Voir le film</button>' +'</div>' +
+          '</div>' +
+          '<button id="tmdbSynClose" class="icon-btn" type="button" title="Fermer" style="flex:0 0 auto;">✕</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="padding:0 14px 14px;">' +
+      '<div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;opacity:.70;margin-bottom:6px;">Synopsis</div>' +
+      '<div id="tmdbSynBody" style="font-size:13px;line-height:1.45;opacity:.92;white-space:pre-wrap;word-break:break-word;"></div>' +
+      '<div id="tmdbSynFoot" style="margin-top:10px;font-size:11px;opacity:.70;"></div>' +
+    '</div>'
+  );
+
+  const close = () => __hideSynopsisModal();
+  bd.addEventListener('click', close);
+  modal.querySelector('#tmdbSynClose')?.addEventListener('click', close);
+  modal.querySelector('#tmdbSynPlay')?.addEventListener('click', () => __playSynopsisCurrentEntry());
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') __hideSynopsisModal();
+  });
+
+  document.body.appendChild(bd);
+  document.body.appendChild(modal);
+
+  __tmdbSynopsisBackdropEl = bd;
+  __tmdbSynopsisModalEl = modal;
+}
+
+function __showSynopsisModal() {
+  __ensureSynopsisModal();
+  if (__tmdbSynopsisBackdropEl) __tmdbSynopsisBackdropEl.style.display = 'block';
+  if (__tmdbSynopsisModalEl) __tmdbSynopsisModalEl.style.display = 'block';
+}
+
+function __hideSynopsisModal() {
+  if (__tmdbSynopsisBackdropEl) __tmdbSynopsisBackdropEl.style.display = 'none';
+  if (__tmdbSynopsisModalEl) __tmdbSynopsisModalEl.style.display = 'none';
+}
+
+function __playSynopsisCurrentEntry() {
+  const entry = __tmdbSynopsisCurrentEntry;
+  if (!entry) return;
+  try {
+    // Prefer the canonical player path for channelList
+    let idx = -1;
+    try {
+      if (Array.isArray(channels) && entry?.url) {
+        idx = channels.findIndex(e => e && e.url === entry.url);
+      }
+    } catch {}
+
+    if (idx >= 0) {
+      playChannel(idx);
+    } else {
+      // Fallback (should be rare)
+      currentListType = 'channels';
+      playUrl(entry);
+      refreshActiveListsUI();
+    }
+  } catch (e) {
+    console.warn('Synopsis: play error', e);
+  }
+  __hideSynopsisModal();
+}
+
+function __setSynopsisModalContent({ title, meta, overview, foot, posterUrl }) {
+  __ensureSynopsisModal();
+  const t = __tmdbSynopsisModalEl.querySelector('#tmdbSynTitle');
+  const m = __tmdbSynopsisModalEl.querySelector('#tmdbSynMeta');
+  const b = __tmdbSynopsisModalEl.querySelector('#tmdbSynBody');
+  const f = __tmdbSynopsisModalEl.querySelector('#tmdbSynFoot');
+  const p = __tmdbSynopsisModalEl.querySelector('#tmdbSynPoster');
+
+  if (t) t.textContent = title || '';
+  if (m) m.textContent = meta || '';
+  if (b) b.textContent = overview || '';
+  if (f) f.textContent = foot || '';
+
+  if (p) {
+    if (posterUrl) {
+      p.style.display = 'block';
+      p.innerHTML = '<img src="' + posterUrl + '" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" />';
+    } else {
+      p.style.display = 'none';
+      p.innerHTML = '';
+    }
+  }
+}
+
+function __formatMinutes(mins) {
+  const n = Number(mins || 0);
+  if (!n || n < 1) return '';
+  const h = Math.floor(n / 60);
+  const m = n % 60;
+  if (h <= 0) return n + ' min';
+  return h + 'h' + (m ? String(m).padStart(2, '0') : '00');
+}
+
+async function __tmdbSearchMovieId(query, year, lang) {
+  const base = 'https://api.themoviedb.org/3';
+  const params = new URLSearchParams();
+  params.set('api_key', TMDB_API_KEY);
+  params.set('query', query);
+  params.set('include_adult', 'false');
+  if (lang) params.set('language', lang);
+  if (year) {
+    params.set('year', year);
+    params.set('primary_release_year', year);
+  }
+
+  const search = await __tmdbJson(base + '/search/movie?' + params.toString());
+  const results = Array.isArray(search?.results) ? search.results : [];
+  if (!results.length) return null;
+
+  // meilleur candidat: match année, sinon premier
+  if (year) {
+    const byYear = results.find(r => (r?.release_date || '').startsWith(String(year)));
+    if (byYear?.id) return byYear.id;
+  }
+  return results[0]?.id || null;
+}
+
+async function __tmdbGetMovieDetails(movieId, lang) {
+  const base = 'https://api.themoviedb.org/3';
+  const p = new URLSearchParams();
+  p.set('api_key', TMDB_API_KEY);
+  if (lang) p.set('language', lang);
+  return await __tmdbJson(base + '/movie/' + String(movieId) + '?' + p.toString());
+}
+
+function __synopsisCacheKey(entry, lang) {
+  const q = __extractTitleYear(entry?.name || '');
+  const t = (q.title || '').toLowerCase().trim();
+  const y = (q.year || '').trim();
+  const l = (lang || '').trim();
+  return (t || 'unknown') + '|' + y + '|' + l;
+}
+
+async function openSynopsisFromEntry(entry) {
+  if (!entry || entry.listType !== 'channels') return; // strict: films seulement
+  __tmdbSynopsisCurrentEntry = entry;
+  if (!TMDB_API_KEY) {
+    setStatus('Synopsis: TMDB_API_KEY manquant');
+    return;
+  }
+
+  const q = __extractTitleYear(entry?.name || '');
+  const query = q.title || entry?.name || '';
+  const year = q.year ? String(q.year) : '';
+  if (!query) {
+    setStatus('Synopsis: titre introuvable');
+    return;
+  }
+
+  // Affiche immédiatement un squelette
+  __setSynopsisModalContent({
+    title: normalizeName(entry.name),
+    meta: year ? ('Année: ' + year) : '',
+    overview: 'Chargement…',
+    foot: 'Source: TMDb',
+    posterUrl: ''
+  });
+  __showSynopsisModal();
+
+  // anti double-clic
+  const cacheKeyPrimary = __synopsisCacheKey(entry, TMDB_LANG_PRIMARY);
+  if (__tmdbSynopsisBusyKey === cacheKeyPrimary) return;
+  __tmdbSynopsisBusyKey = cacheKeyPrimary;
+
+  try {
+    // 1) Cache
+    const cached = __tmdbSynopsisCache.get(cacheKeyPrimary);
+    if (cached && cached.ok && cached.data && (Date.now() - (cached.at || 0)) < 1000 * 60 * 60 * 24 * 7) {
+      const d = cached.data;
+      __setSynopsisModalContent(d);
+      return;
+    }
+
+    // 2) Résoudre ID movie (FR -> EN)
+    let movieId = await __tmdbSearchMovieId(query, year, TMDB_LANG_PRIMARY);
+    let usedLang = TMDB_LANG_PRIMARY;
+    if (!movieId && TMDB_LANG_FALLBACK && TMDB_LANG_FALLBACK !== TMDB_LANG_PRIMARY) {
+      movieId = await __tmdbSearchMovieId(query, year, TMDB_LANG_FALLBACK);
+      usedLang = TMDB_LANG_FALLBACK;
+    }
+    if (!movieId) throw new Error('Aucun résultat TMDb');
+
+    // 3) Details FR
+    let details = await __tmdbGetMovieDetails(movieId, TMDB_LANG_PRIMARY);
+
+    // fallback synopsis EN si synopsis FR vide
+    const frOverview = String(details?.overview || '').trim();
+    if (!frOverview && TMDB_LANG_FALLBACK && TMDB_LANG_FALLBACK !== TMDB_LANG_PRIMARY) {
+      const en = await __tmdbGetMovieDetails(movieId, TMDB_LANG_FALLBACK);
+      // on garde le titre/infos FR si dispo, mais on prend overview EN
+      if (en && String(en.overview || '').trim()) {
+        details = Object.assign({}, details, { overview: en.overview });
+      }
+    }
+
+    const movieTitle = String(details?.title || details?.original_title || query || '').trim();
+    const releaseYear = String(details?.release_date || '').slice(0, 4) || year;
+    const runtime = __formatMinutes(details?.runtime);
+    const note = (typeof details?.vote_average === 'number' && details.vote_average > 0) ? (details.vote_average.toFixed(1) + '/10') : '';
+
+    const metaParts = [];
+    if (releaseYear) metaParts.push(releaseYear);
+    if (runtime) metaParts.push(runtime);
+    if (note) metaParts.push('★ ' + note);
+
+    const posterPath = details?.poster_path ? String(details.poster_path) : '';
+    const posterUrl = posterPath ? ('https://image.tmdb.org/t/p/w185' + posterPath) : '';
+
+    const data = {
+      title: movieTitle,
+      meta: metaParts.join(' • '),
+      overview: String(details?.overview || '').trim() || 'Synopsis indisponible.',
+      foot: 'Source: TMDb' + (usedLang ? (' • ' + usedLang) : ''),
+      posterUrl
+    };
+
+    __tmdbSynopsisCache.set(cacheKeyPrimary, { ok: true, data, at: Date.now() });
+    __setSynopsisModalContent(data);
+  } catch (err) {
+    const msg = err?.message ? String(err.message) : 'Erreur synopsis';
+    __tmdbSynopsisCache.set(cacheKeyPrimary, { ok: false, info: msg, at: Date.now() });
+    __setSynopsisModalContent({
+      title: normalizeName(entry.name),
+      meta: year ? ('Année: ' + year) : '',
+      overview: 'Synopsis indisponible (' + msg + ')',
+      foot: 'Source: TMDb',
+      posterUrl: ''
+    });
+  } finally {
+    __tmdbSynopsisBusyKey = '';
+  }
+}
+
+// Attache le click sur le TITRE pour ouvrir le synopsis — strictement sur la channelList (Films)
+function __attachSynopsisClickHandlersToChannelList() {
+  if (!channelListEl) return;
+  const items = Array.from(channelListEl.querySelectorAll('.channel-item'));
+
+  for (const item of items) {
+    // Larger click target than the title text: the whole title row
+    // (number + title + status).
+    const clickZone = item.querySelector('.channel-title-row') || item.querySelector('.channel-title');
+    if (!clickZone) continue;
+
+    // Idempotent binding on this DOM element
+    if (clickZone.dataset.synopsisBound === '1') continue;
+    clickZone.dataset.synopsisBound = '1';
+
+    const idx = parseInt(item.dataset.index || '-1', 10);
+    if (!(idx >= 0 && idx < channels.length)) continue;
+
+    // UX: make it clear this area is clickable
+    try {
+      clickZone.style.cursor = 'pointer';
+      // Make the click zone span the available width when possible
+      clickZone.style.width = '100%';
+    } catch {}
+
+    const handler = (ev) => {
+      // Prevent the parent item click (play) and open the synopsis instead
+      ev.preventDefault();
+      ev.stopPropagation();
+      const entry = channels[idx];
+      if (!entry) return;
+      openSynopsisFromEntry(entry);
+    };
+
+    clickZone.addEventListener('click', handler);
+
+    // Keyboard accessibility (desktop)
+    try {
+      clickZone.tabIndex = 0;
+      clickZone.setAttribute('role', 'button');
+      clickZone.addEventListener('keydown', (ev) => {
+        const k = ev.key || '';
+        if (k === 'Enter' || k === ' ') {
+          handler(ev);
+        }
+      });
+    } catch {}
+  }
+}
+
+
+
+
+
+
+
+
+
 
 
 let suspendRender = false;
