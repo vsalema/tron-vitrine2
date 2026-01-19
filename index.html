@@ -1,6 +1,7 @@
 <script>
   window.aclib = {
     runPop: function() {
+      zoneId: '10628474',
       console.warn("aclib.runPop a été bloqué");
     }
   };
@@ -348,6 +349,7 @@ document.addEventListener("DOMContentLoaded", function() {
 <script>
 if (typeof aclib !== "undefined") {
   aclib.runPop = function() {
+    zoneId: '10628474',
     console.warn("aclib.runPop bloqué par l'utilisateur");
   };
 }
