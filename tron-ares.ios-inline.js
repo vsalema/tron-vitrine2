@@ -349,302 +349,6 @@ function toggleNewAdditionsMode(){
   scrollToActiveItem();
 }
 
-// =====================================================
-// 🎞️ VITRINE (Showcase) — Best Value Upgrade
-// - Sections par catégorie (ordre playlist)
-// - Rows scroll horizontal + flèches par page
-// - Recherche + chips (Tous / Récents / Favoris / 4K / VF / VOSTFR)
-// - Favoris ★ sur les cartes + badge NEW (nouveaux_items.json)
-// =====================================================
-let showcaseOpen = false;
-let showcaseQuery = '';
-let showcaseFilter = 'all'; // 'all' | 'recent' | 'favorites' | '4k' | 'vf' | 'vostfr'
-
-function __showcaseNorm(s){
-  return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-}
-
-function __showcaseIs4K(entry){
-  const t = (entry?.name || '') + ' ' + (entry?.group || '');
-  return /(4k|uhd|2160p)/i.test(t);
-}
-function __showcaseIsVOSTFR(entry){
-  const t = (entry?.name || '') + ' ' + (entry?.group || '');
-  return /(vostfr|vost)/i.test(t);
-}
-function __showcaseIsVF(entry){
-  const t = (entry?.name || '') + ' ' + (entry?.group || '');
-  // évite de classer VOSTFR comme VF
-  return (/(vf|truefrench)/i.test(t)) && !/(vostfr|vost)/i.test(t);
-}
-
-function __showcaseGetNewSet(){
-  const idxs = computeNewAdditionsIndexes();
-  return new Set(idxs);
-}
-
-function updateShowcaseButtonVisibility(){
-  if (!showcaseContainer || !showcaseBtn) return;
-  const isFilmTab = (getActiveTabKey() === 'channels');
-  if (!isFilmTab){
-    showcaseContainer.classList.add('hidden');
-    // Si on quitte l'onglet Films, on ferme la vitrine pour éviter un overlay "fantôme"
-    if (showcaseOpen) closeShowcase();
-    return;
-  }
-  showcaseContainer.classList.remove('hidden');
-  showcaseBtn.disabled = false;
-}
-
-function closeShowcase(){
-  if (!showcaseOverlay) return;
-  showcaseOverlay.classList.add('hidden');
-  showcaseOverlay.setAttribute('aria-hidden', 'true');
-  showcaseOpen = false;
-}
-
-function __renderShowcaseChips(filteredEntries, newSet){
-  if (!showcaseChips) return;
-
-  const countAll = filteredEntries.length;
-  const countRecent = filteredEntries.reduce((acc, x) => acc + (newSet.has(x.index) ? 1 : 0), 0);
-  const countFav = filteredEntries.reduce((acc, x) => acc + (x.entry?.isFavorite ? 1 : 0), 0);
-  const count4k = filteredEntries.reduce((acc, x) => acc + (__showcaseIs4K(x.entry) ? 1 : 0), 0);
-  const countVf = filteredEntries.reduce((acc, x) => acc + (__showcaseIsVF(x.entry) ? 1 : 0), 0);
-  const countVost = filteredEntries.reduce((acc, x) => acc + (__showcaseIsVOSTFR(x.entry) ? 1 : 0), 0);
-
-  const chips = [
-    { key: 'all', label: `Tous (${countAll})` },
-    { key: 'recent', label: `Récents (${countRecent})` },
-    { key: 'favorites', label: `Favoris (${countFav})` },
-    { key: '4k', label: `4K (${count4k})` },
-    { key: 'vf', label: `VF (${countVf})` },
-    { key: 'vostfr', label: `VOSTFR (${countVost})` },
-  ];
-
-  showcaseChips.innerHTML = '';
-  for (const c of chips){
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'showcase-chip' + (showcaseFilter === c.key ? ' active' : '');
-    b.textContent = c.label;
-    b.addEventListener('click', () => {
-      showcaseFilter = c.key;
-      openShowcase(true);
-    });
-    showcaseChips.appendChild(b);
-  }
-}
-
-function __showcasePassFilter(entry, index, filterKey, newSet){
-  if (filterKey === 'recent') return newSet.has(index);
-  if (filterKey === 'favorites') return !!entry?.isFavorite;
-  if (filterKey === '4k') return __showcaseIs4K(entry);
-  if (filterKey === 'vf') return __showcaseIsVF(entry);
-  if (filterKey === 'vostfr') return __showcaseIsVOSTFR(entry);
-  return true;
-}
-
-function __scrollRowByPage(scroller, dir){
-  if (!scroller) return;
-  const page = Math.max(220, Math.floor(scroller.clientWidth * 0.92));
-  scroller.scrollBy({ left: dir * page, behavior: 'smooth' });
-}
-
-function openShowcase(reRenderOnly=false){
-  if (getActiveTabKey() !== 'channels') return;
-  if (!showcaseOverlay || !showcaseBody) return;
-
-  const q = __showcaseNorm(showcaseQuery).trim();
-  const newSet = __showcaseGetNewSet();
-
-  // Dataset de base: films (channels) uniquement, ordre playlist
-  let base = channels.map((entry, index) => ({ entry, index }));
-
-  // Recherche (avant chips)
-  if (q){
-    base = base.filter(x => __showcaseNorm(x.entry?.name).includes(q));
-  }
-
-  // (Re)render chips à partir de la base après recherche
-  __renderShowcaseChips(base, newSet);
-
-  // Applique filtre actif
-  const filtered = base.filter(x => __showcasePassFilter(x.entry, x.index, showcaseFilter, newSet));
-
-  // Subtitle
-  if (showcaseSub){
-    const labelMap = {
-      all: 'Tous', recent: 'Récents', favorites: 'Favoris', '4k': '4K', vf: 'VF', vostfr: 'VOSTFR'
-    };
-    const lbl = labelMap[showcaseFilter] || 'Tous';
-    const s = q ? `Recherche: “${showcaseQuery}”` : '—';
-    showcaseSub.textContent = `${lbl} • ${filtered.length} • ${s}`;
-  }
-
-  // Build sections (ordre playlist)
-  const groupMap = new Map();
-  for (const x of filtered){
-    const g = (x.entry?.group || 'Autres').trim() || 'Autres';
-    if (!groupMap.has(g)) groupMap.set(g, []);
-    groupMap.get(g).push(x);
-  }
-
-  showcaseBody.innerHTML = '';
-
-  if (filtered.length === 0){
-    const empty = document.createElement('div');
-    empty.className = 'showcase-empty';
-    empty.textContent = q ? 'Aucun résultat pour cette recherche.' : 'Aucun film à afficher.';
-    showcaseBody.appendChild(empty);
-  } else {
-    const frag = document.createDocumentFragment();
-
-    for (const [groupName, items] of groupMap.entries()){
-      const sectionEl = document.createElement('section');
-      sectionEl.className = 'showcase-section';
-
-      const titleRow = document.createElement('div');
-      titleRow.className = 'showcase-section-title';
-
-      const h = document.createElement('div');
-      h.className = 'showcase-section-name';
-      h.textContent = groupName;
-
-      const c = document.createElement('div');
-      c.className = 'showcase-section-count';
-      c.textContent = String(items.length);
-
-      titleRow.appendChild(h);
-      titleRow.appendChild(c);
-
-      const rowWrap = document.createElement('div');
-      rowWrap.className = 'showcase-row-wrap';
-
-      const leftBtn = document.createElement('button');
-      leftBtn.type = 'button';
-      leftBtn.className = 'showcase-row-nav showcase-row-nav-left';
-      leftBtn.innerHTML = '◀';
-      leftBtn.title = 'Précédent';
-
-      const rightBtn = document.createElement('button');
-      rightBtn.type = 'button';
-      rightBtn.className = 'showcase-row-nav showcase-row-nav-right';
-      rightBtn.innerHTML = '▶';
-      rightBtn.title = 'Suivant';
-
-      const scroller = document.createElement('div');
-      scroller.className = 'showcase-row';
-
-      leftBtn.addEventListener('click', (ev) => { ev.stopPropagation(); __scrollRowByPage(scroller, -1); });
-      rightBtn.addEventListener('click', (ev) => { ev.stopPropagation(); __scrollRowByPage(scroller, 1); });
-
-      for (const it of items){
-        const entry = it.entry;
-        const index = it.index;
-
-        const card = document.createElement('button');
-        card.type = 'button';
-        card.className = 'showcase-item';
-        card.dataset.index = String(index);
-        card.title = String(entry?.name || '');
-
-        const poster = document.createElement('div');
-        poster.className = 'showcase-poster';
-
-        const logo = entry?.logo || deriveLogoFromName(entry?.name);
-        if (logo && logo.type === 'image'){
-          const img = document.createElement('img');
-          img.src = logo.value;
-          img.alt = entry?.name || '';
-          try { img.loading = 'lazy'; } catch {}
-          try { img.decoding = 'async'; } catch {}
-          poster.appendChild(img);
-        } else {
-          const letter = document.createElement('div');
-          letter.className = 'showcase-letter';
-          letter.textContent = (logo?.value || deriveLogoFromName(entry?.name).value || '?');
-          poster.appendChild(letter);
-        }
-
-        // badges
-        if (newSet.has(index)){
-          const b = document.createElement('div');
-          b.className = 'showcase-badge showcase-badge-new';
-          b.textContent = 'NEW';
-          poster.appendChild(b);
-        }
-
-        const fav = document.createElement('button');
-        fav.type = 'button';
-        fav.className = 'showcase-fav' + (entry?.isFavorite ? ' is-fav' : '');
-        fav.innerHTML = '★';
-        fav.title = entry?.isFavorite ? 'Retirer des favoris' : 'Ajouter aux favoris';
-        fav.addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          entry.isFavorite = !entry.isFavorite;
-          refreshActiveListsUI();
-          renderFavoritesList();
-          // Re-render vitrine pour mettre à jour chips + état étoile
-          openShowcase(true);
-        });
-        poster.appendChild(fav);
-
-        const meta = document.createElement('div');
-        meta.className = 'showcase-meta';
-
-        const name = document.createElement('div');
-        name.className = 'showcase-name';
-        name.textContent = normalizeName(entry?.name || '');
-
-        const sub = document.createElement('div');
-        sub.className = 'showcase-subline';
-        sub.textContent = entry?.group || '';
-
-        meta.appendChild(name);
-        meta.appendChild(sub);
-
-        card.appendChild(poster);
-        card.appendChild(meta);
-
-        card.addEventListener('click', () => {
-          // Lecture film
-          playChannel(index);
-          closeShowcase();
-        });
-
-        scroller.appendChild(card);
-      }
-
-      rowWrap.appendChild(leftBtn);
-      rowWrap.appendChild(scroller);
-      rowWrap.appendChild(rightBtn);
-
-      sectionEl.appendChild(titleRow);
-      sectionEl.appendChild(rowWrap);
-
-      frag.appendChild(sectionEl);
-    }
-
-    showcaseBody.appendChild(frag);
-  }
-
-  // Ouvre overlay
-  if (!reRenderOnly){
-    showcaseOverlay.classList.remove('hidden');
-    showcaseOverlay.setAttribute('aria-hidden', 'false');
-    showcaseOpen = true;
-  } else {
-    // si déjà ouvert, on ne retouche pas la visibilité
-    if (!showcaseOpen){
-      showcaseOverlay.classList.remove('hidden');
-      showcaseOverlay.setAttribute('aria-hidden', 'false');
-      showcaseOpen = true;
-    }
-  }
-}
-
-
    // [{ id, sourceType, sourceIndex, entry }]
 let currentFavPos = -1;   // position dans favoritesView
 
@@ -796,16 +500,199 @@ const favoriteListEl = document.getElementById('favoriteList');
 const newAdditionsContainer = document.getElementById('newAdditionsContainer');
 const newAdditionsBtn = document.getElementById('newAdditionsBtn');
 
-// --- Vitrine (Showcase) DOM refs ---
+// =====================================================
+// 🎞️ Vitrine (overlay) — Films (channelList)
+// =====================================================
 const showcaseContainer = document.getElementById('showcaseContainer');
 const showcaseBtn = document.getElementById('showcaseBtn');
 const showcaseOverlay = document.getElementById('showcaseOverlay');
-const showcaseCloseBtn = document.getElementById('showcaseCloseBtn');
 const showcaseBody = document.getElementById('showcaseBody');
+const showcaseCloseBtn = document.getElementById('showcaseCloseBtn');
 const showcaseSearchInput = document.getElementById('showcaseSearchInput');
-const showcaseClearSearchBtn = document.getElementById('showcaseClearSearchBtn');
-const showcaseChips = document.getElementById('showcaseChips');
-const showcaseSub = document.getElementById('showcaseSub');
+const showcaseSearchClear = document.getElementById('showcaseSearchClear');
+const showcaseSearchWrap = document.getElementById('showcaseSearchWrap');
+
+let showcaseOpen = false;
+let showcaseQuery = '';
+
+function __normSearch(s){
+  return (s || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
+
+function updateShowcaseButtonVisibility(){
+  if(!showcaseContainer || !showcaseBtn) return;
+
+  const isFilmTab = (getActiveTabKey() === 'channels');
+  if(!isFilmTab){
+    showcaseContainer.classList.add('hidden');
+    if(showcaseOpen) closeShowcase();
+    return;
+  }
+
+  showcaseContainer.classList.remove('hidden');
+}
+
+function buildShowcase(){
+  if(!showcaseBody) return;
+  const q = __normSearch(showcaseQuery).trim();
+
+  // Groupes: on conserve l'ordre d'apparition
+  const groups = new Map();
+  for(let i=0;i<channels.length;i++) {
+    const ch = channels[i];
+    if(!ch || !ch.url) continue;
+
+    const nameN = __normSearch(ch.name || '');
+    const group = (ch.group || 'Autres').toString();
+    const groupN = __normSearch(group);
+
+    if(q && !(nameN.includes(q) || groupN.includes(q))) continue;
+
+    if(!groups.has(group)) groups.set(group, []);
+    groups.get(group).push({ ch, idx: i });
+  }
+
+  showcaseBody.innerHTML = '';
+
+  if(!groups.size){
+    const empty = document.createElement('div');
+    empty.className = 'showcase-empty';
+    empty.textContent = 'Aucun film trouvé.';
+    showcaseBody.appendChild(empty);
+    return;
+  }
+
+  for(const [group, items] of groups.entries()){
+    const section = document.createElement('section');
+    section.className = 'showcase-section';
+
+    const header = document.createElement('div');
+    header.className = 'showcase-section-header';
+
+    const title = document.createElement('div');
+    title.className = 'showcase-section-title';
+    title.textContent = group;
+
+    const count = document.createElement('div');
+    count.className = 'showcase-section-count';
+    count.textContent = String(items.length);
+
+    header.appendChild(title);
+    header.appendChild(count);
+
+    const row = document.createElement('div');
+    row.className = 'showcase-row';
+
+    for(const {ch, idx} of items){
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'showcase-card';
+      card.dataset.index = String(idx);
+      try { card.title = String(ch.name || ''); } catch {}
+
+      const poster = document.createElement('div');
+      poster.className = 'showcase-poster';
+      if(ch.logo && ch.logo.type === 'image' && ch.logo.value){
+        const safe = String(ch.logo.value).replace(/"/g, '%22');
+        poster.style.backgroundImage = `url("${safe}")`;
+      }
+
+      const label = document.createElement('div');
+      label.className = 'showcase-label';
+      label.textContent = normalizeName(ch.name);
+
+      card.appendChild(poster);
+      card.appendChild(label);
+
+      card.addEventListener('click', () => {
+        closeShowcase();
+        playChannel(idx);
+      });
+
+      row.appendChild(card);
+    }
+
+    section.appendChild(header);
+    section.appendChild(row);
+    showcaseBody.appendChild(section);
+  }
+}
+
+function openShowcase(){
+  if(getActiveTabKey() !== 'channels') return;
+  if(!showcaseOverlay) return;
+
+  buildShowcase();
+  showcaseOverlay.classList.remove('hidden');
+  showcaseOverlay.setAttribute('aria-hidden', 'false');
+  showcaseOpen = true;
+  setTimeout(() => {
+    try { showcaseSearchInput && showcaseSearchInput.focus(); } catch {}
+  }, 0);
+}
+
+function closeShowcase(){
+  if(!showcaseOverlay) return;
+  showcaseOverlay.classList.add('hidden');
+  showcaseOverlay.setAttribute('aria-hidden', 'true');
+  showcaseOpen = false;
+}
+
+function __syncShowcaseSearchWrap(){
+  if(!showcaseSearchWrap || !showcaseSearchInput) return;
+  const has = !!String(showcaseSearchInput.value || '').trim();
+  showcaseSearchWrap.classList.toggle('has-text', has);
+}
+
+(() => {
+  // boutons
+  if(showcaseBtn) showcaseBtn.addEventListener('click', (e) => { e.preventDefault(); openShowcase(); });
+  if(showcaseCloseBtn) showcaseCloseBtn.addEventListener('click', (e) => { e.preventDefault(); closeShowcase(); });
+
+  // click sur fond → fermer (mais pas si click sur une carte)
+  if(showcaseOverlay){
+    showcaseOverlay.addEventListener('click', (e) => {
+      if(e && e.target === showcaseOverlay) closeShowcase();
+    });
+  }
+
+  // recherche
+  if(showcaseSearchInput){
+    showcaseSearchInput.addEventListener('input', () => {
+      showcaseQuery = showcaseSearchInput.value || '';
+      __syncShowcaseSearchWrap();
+      buildShowcase();
+    });
+  }
+  if(showcaseSearchClear){
+    showcaseSearchClear.addEventListener('click', (e) => {
+      e.preventDefault();
+      if(!showcaseSearchInput) return;
+      showcaseSearchInput.value = '';
+      showcaseQuery = '';
+      __syncShowcaseSearchWrap();
+      buildShowcase();
+      try { showcaseSearchInput.focus(); } catch {}
+    });
+  }
+
+  // ESC
+  document.addEventListener('keydown', (e) => {
+    if(!showcaseOpen) return;
+    if(e.key === 'Escape'){
+      e.preventDefault();
+      closeShowcase();
+    }
+  }, true);
+
+  // visibilité selon tab
+  updateShowcaseButtonVisibility();
+  document.addEventListener('click', (e) => {
+    if (e.target && e.target.closest && e.target.closest('.tab-btn')) {
+      setTimeout(() => updateShowcaseButtonVisibility(), 0);
+    }
+  }, true);
+})();
 
 
 // =====================================================
@@ -832,75 +719,6 @@ const showcaseSub = document.getElementById('showcaseSub');
     }
   }, true);
 })();
-
-// =====================================================
-// 🎞️ Vitrine - INIT
-// =====================================================
-(() => {
-  updateShowcaseButtonVisibility();
-
-  // Bouton vitrine
-  if (showcaseBtn) {
-    showcaseBtn.addEventListener('click', async (e) => {
-      e.preventDefault();
-      // Recharge les IDs "NEW" (utile si tu viens de push un nouveaux_items.json)
-      await fetchNewAdditionsIds();
-      updateNewAdditionsButtonVisibility();
-      openShowcase(false);
-    });
-  }
-
-  // Fermer
-  if (showcaseCloseBtn) {
-    showcaseCloseBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      closeShowcase();
-    });
-  }
-
-  // Clic en dehors du panneau
-  if (showcaseOverlay) {
-    showcaseOverlay.addEventListener('click', (e) => {
-      if (e.target === showcaseOverlay) closeShowcase();
-    });
-  }
-
-  // ESC
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && showcaseOpen) closeShowcase();
-  });
-
-  // Recherche
-  let t = null;
-  const schedule = () => {
-    if (t) clearTimeout(t);
-    t = setTimeout(() => openShowcase(true), 80);
-  };
-
-  if (showcaseSearchInput) {
-    showcaseSearchInput.addEventListener('input', () => {
-      showcaseQuery = showcaseSearchInput.value || '';
-      schedule();
-    });
-  }
-
-  if (showcaseClearSearchBtn) {
-    showcaseClearSearchBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      showcaseQuery = '';
-      if (showcaseSearchInput) showcaseSearchInput.value = '';
-      openShowcase(true);
-    });
-  }
-
-  // Quand tu changes d'onglet, on masque/affiche le bouton
-  document.addEventListener('click', (e) => {
-    if (e.target && e.target.closest && e.target.closest('.tab-btn')) {
-      setTimeout(() => updateShowcaseButtonVisibility(), 0);
-    }
-  }, true);
-})();
-
 
 const statusPill = document.getElementById('statusPill');
 const npLogo = document.getElementById('npLogo');
@@ -2055,354 +1873,6 @@ async function openTrailerFromEntry(entry, btnEl) {
     if (btnEl) { btnEl.disabled = false; }
   }
 }
-// =====================================================
-// SYNOPSIS (TMDb) — Films (channelList uniquement) — ouverture AU CLIC sur le titre
-// =====================================================
-// Objectif UX : éviter le hover (mobile), ne pas impacter la hauteur des items.
-// Le synopsis s'affiche dans un petit modal/overlay réutilisable.
-
-const __tmdbSynopsisCache = new Map(); // key "title|year|lang" -> { ok:boolean, data?:object, at:number, info?:string }
-let __tmdbSynopsisModalEl = null;
-let __tmdbSynopsisBackdropEl = null;
-let __tmdbSynopsisBusyKey = '';
-
-function __ensureSynopsisModal() {
-  if (__tmdbSynopsisModalEl && __tmdbSynopsisBackdropEl) return;
-
-  // Backdrop
-  const bd = document.createElement('div');
-  bd.id = 'tmdbSynopsisBackdrop';
-  bd.style.cssText = [
-    'position:fixed',
-    'inset:0',
-    'background:rgba(0,0,0,.58)',
-    'backdrop-filter:blur(2px)',
-    'z-index:999999',
-    'display:none'
-  ].join(';');
-
-  // Modal
-  const modal = document.createElement('div');
-  modal.id = 'tmdbSynopsisModal';
-  modal.style.cssText = [
-    'position:fixed',
-    'left:50%',
-    'top:50%',
-    'transform:translate(-50%,-50%)',
-    'width:min(420px, calc(100vw - 28px))',
-    'max-height:min(70vh, 560px)',
-    'overflow:auto',
-    'background:rgba(12,14,18,.96)',
-    'border:1px solid rgba(255,255,255,.10)',
-    'border-radius:16px',
-    'box-shadow:0 18px 55px rgba(0,0,0,.55)',
-    'z-index:1000000',
-    'display:none'
-  ].join(';');
-
-  modal.innerHTML = (
-    '<div style="display:flex;align-items:flex-start;gap:12px;padding:14px 14px 10px;">' +
-      '<div id="tmdbSynPoster" style="width:72px;min-width:72px;height:108px;border-radius:10px;overflow:hidden;background:rgba(255,255,255,.06);display:none;"></div>' +
-      '<div style="flex:1;min-width:0;">' +
-        '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">' +
-          '<div style="min-width:0;">' +
-            '<div id="tmdbSynTitle" style="font-weight:900;font-size:14px;line-height:1.2;letter-spacing:.01em;word-break:break-word;"></div>' +
-            '<div id=\"tmdbSynMeta\" style=\"margin-top:6px;font-size:12px;opacity:.85;line-height:1.2;\"></div>' +'<div style=\"margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;\">' +'<button id=\"tmdbSynPlay\" type=\"button\" title=\"Voir le film\" style=\"padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.10);color:#fff;font-weight:800;font-size:12px;cursor:pointer;\">▶ Voir le film</button>' +'</div>' +
-          '</div>' +
-          '<button id="tmdbSynClose" class="icon-btn" type="button" title="Fermer" style="flex:0 0 auto;">✕</button>' +
-        '</div>' +
-      '</div>' +
-    '</div>' +
-    '<div style="padding:0 14px 14px;">' +
-      '<div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;opacity:.70;margin-bottom:6px;">Synopsis</div>' +
-      '<div id="tmdbSynBody" style="font-size:13px;line-height:1.45;opacity:.92;white-space:pre-wrap;word-break:break-word;"></div>' +
-      '<div id="tmdbSynFoot" style="margin-top:10px;font-size:11px;opacity:.70;"></div>' +
-    '</div>'
-  );
-
-  const close = () => __hideSynopsisModal();
-  bd.addEventListener('click', close);
-  modal.querySelector('#tmdbSynClose')?.addEventListener('click', close);
-  modal.querySelector('#tmdbSynPlay')?.addEventListener('click', () => __playSynopsisCurrentEntry());
-  document.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape') __hideSynopsisModal();
-  });
-
-  document.body.appendChild(bd);
-  document.body.appendChild(modal);
-
-  __tmdbSynopsisBackdropEl = bd;
-  __tmdbSynopsisModalEl = modal;
-}
-
-function __showSynopsisModal() {
-  __ensureSynopsisModal();
-  if (__tmdbSynopsisBackdropEl) __tmdbSynopsisBackdropEl.style.display = 'block';
-  if (__tmdbSynopsisModalEl) __tmdbSynopsisModalEl.style.display = 'block';
-}
-
-function __hideSynopsisModal() {
-  if (__tmdbSynopsisBackdropEl) __tmdbSynopsisBackdropEl.style.display = 'none';
-  if (__tmdbSynopsisModalEl) __tmdbSynopsisModalEl.style.display = 'none';
-}
-
-function __playSynopsisCurrentEntry() {
-  const entry = __tmdbSynopsisCurrentEntry;
-  if (!entry) return;
-  try {
-    // Prefer the canonical player path for channelList
-    let idx = -1;
-    try {
-      if (Array.isArray(channels) && entry?.url) {
-        idx = channels.findIndex(e => e && e.url === entry.url);
-      }
-    } catch {}
-
-    if (idx >= 0) {
-      playChannel(idx);
-    } else {
-      // Fallback (should be rare)
-      currentListType = 'channels';
-      playUrl(entry);
-      refreshActiveListsUI();
-    }
-  } catch (e) {
-    console.warn('Synopsis: play error', e);
-  }
-  __hideSynopsisModal();
-}
-
-function __setSynopsisModalContent({ title, meta, overview, foot, posterUrl }) {
-  __ensureSynopsisModal();
-  const t = __tmdbSynopsisModalEl.querySelector('#tmdbSynTitle');
-  const m = __tmdbSynopsisModalEl.querySelector('#tmdbSynMeta');
-  const b = __tmdbSynopsisModalEl.querySelector('#tmdbSynBody');
-  const f = __tmdbSynopsisModalEl.querySelector('#tmdbSynFoot');
-  const p = __tmdbSynopsisModalEl.querySelector('#tmdbSynPoster');
-
-  if (t) t.textContent = title || '';
-  if (m) m.textContent = meta || '';
-  if (b) b.textContent = overview || '';
-  if (f) f.textContent = foot || '';
-
-  if (p) {
-    if (posterUrl) {
-      p.style.display = 'block';
-      p.innerHTML = '<img src="' + posterUrl + '" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" />';
-    } else {
-      p.style.display = 'none';
-      p.innerHTML = '';
-    }
-  }
-}
-
-function __formatMinutes(mins) {
-  const n = Number(mins || 0);
-  if (!n || n < 1) return '';
-  const h = Math.floor(n / 60);
-  const m = n % 60;
-  if (h <= 0) return n + ' min';
-  return h + 'h' + (m ? String(m).padStart(2, '0') : '00');
-}
-
-async function __tmdbSearchMovieId(query, year, lang) {
-  const base = 'https://api.themoviedb.org/3';
-  const params = new URLSearchParams();
-  params.set('api_key', TMDB_API_KEY);
-  params.set('query', query);
-  params.set('include_adult', 'false');
-  if (lang) params.set('language', lang);
-  if (year) {
-    params.set('year', year);
-    params.set('primary_release_year', year);
-  }
-
-  const search = await __tmdbJson(base + '/search/movie?' + params.toString());
-  const results = Array.isArray(search?.results) ? search.results : [];
-  if (!results.length) return null;
-
-  // meilleur candidat: match année, sinon premier
-  if (year) {
-    const byYear = results.find(r => (r?.release_date || '').startsWith(String(year)));
-    if (byYear?.id) return byYear.id;
-  }
-  return results[0]?.id || null;
-}
-
-async function __tmdbGetMovieDetails(movieId, lang) {
-  const base = 'https://api.themoviedb.org/3';
-  const p = new URLSearchParams();
-  p.set('api_key', TMDB_API_KEY);
-  if (lang) p.set('language', lang);
-  return await __tmdbJson(base + '/movie/' + String(movieId) + '?' + p.toString());
-}
-
-function __synopsisCacheKey(entry, lang) {
-  const q = __extractTitleYear(entry?.name || '');
-  const t = (q.title || '').toLowerCase().trim();
-  const y = (q.year || '').trim();
-  const l = (lang || '').trim();
-  return (t || 'unknown') + '|' + y + '|' + l;
-}
-
-async function openSynopsisFromEntry(entry) {
-  if (!entry || entry.listType !== 'channels') return; // strict: films seulement
-  __tmdbSynopsisCurrentEntry = entry;
-  if (!TMDB_API_KEY) {
-    setStatus('Synopsis: TMDB_API_KEY manquant');
-    return;
-  }
-
-  const q = __extractTitleYear(entry?.name || '');
-  const query = q.title || entry?.name || '';
-  const year = q.year ? String(q.year) : '';
-  if (!query) {
-    setStatus('Synopsis: titre introuvable');
-    return;
-  }
-
-  // Affiche immédiatement un squelette
-  __setSynopsisModalContent({
-    title: normalizeName(entry.name),
-    meta: year ? ('Année: ' + year) : '',
-    overview: 'Chargement…',
-    foot: 'Source: TMDb',
-    posterUrl: ''
-  });
-  __showSynopsisModal();
-
-  // anti double-clic
-  const cacheKeyPrimary = __synopsisCacheKey(entry, TMDB_LANG_PRIMARY);
-  if (__tmdbSynopsisBusyKey === cacheKeyPrimary) return;
-  __tmdbSynopsisBusyKey = cacheKeyPrimary;
-
-  try {
-    // 1) Cache
-    const cached = __tmdbSynopsisCache.get(cacheKeyPrimary);
-    if (cached && cached.ok && cached.data && (Date.now() - (cached.at || 0)) < 1000 * 60 * 60 * 24 * 7) {
-      const d = cached.data;
-      __setSynopsisModalContent(d);
-      return;
-    }
-
-    // 2) Résoudre ID movie (FR -> EN)
-    let movieId = await __tmdbSearchMovieId(query, year, TMDB_LANG_PRIMARY);
-    let usedLang = TMDB_LANG_PRIMARY;
-    if (!movieId && TMDB_LANG_FALLBACK && TMDB_LANG_FALLBACK !== TMDB_LANG_PRIMARY) {
-      movieId = await __tmdbSearchMovieId(query, year, TMDB_LANG_FALLBACK);
-      usedLang = TMDB_LANG_FALLBACK;
-    }
-    if (!movieId) throw new Error('Aucun résultat TMDb');
-
-    // 3) Details FR
-    let details = await __tmdbGetMovieDetails(movieId, TMDB_LANG_PRIMARY);
-
-    // fallback synopsis EN si synopsis FR vide
-    const frOverview = String(details?.overview || '').trim();
-    if (!frOverview && TMDB_LANG_FALLBACK && TMDB_LANG_FALLBACK !== TMDB_LANG_PRIMARY) {
-      const en = await __tmdbGetMovieDetails(movieId, TMDB_LANG_FALLBACK);
-      // on garde le titre/infos FR si dispo, mais on prend overview EN
-      if (en && String(en.overview || '').trim()) {
-        details = Object.assign({}, details, { overview: en.overview });
-      }
-    }
-
-    const movieTitle = String(details?.title || details?.original_title || query || '').trim();
-    const releaseYear = String(details?.release_date || '').slice(0, 4) || year;
-    const runtime = __formatMinutes(details?.runtime);
-    const note = (typeof details?.vote_average === 'number' && details.vote_average > 0) ? (details.vote_average.toFixed(1) + '/10') : '';
-
-    const metaParts = [];
-    if (releaseYear) metaParts.push(releaseYear);
-    if (runtime) metaParts.push(runtime);
-    if (note) metaParts.push('★ ' + note);
-
-    const posterPath = details?.poster_path ? String(details.poster_path) : '';
-    const posterUrl = posterPath ? ('https://image.tmdb.org/t/p/w185' + posterPath) : '';
-
-    const data = {
-      title: movieTitle,
-      meta: metaParts.join(' • '),
-      overview: String(details?.overview || '').trim() || 'Synopsis indisponible.',
-      foot: 'Source: TMDb' + (usedLang ? (' • ' + usedLang) : ''),
-      posterUrl
-    };
-
-    __tmdbSynopsisCache.set(cacheKeyPrimary, { ok: true, data, at: Date.now() });
-    __setSynopsisModalContent(data);
-  } catch (err) {
-    const msg = err?.message ? String(err.message) : 'Erreur synopsis';
-    __tmdbSynopsisCache.set(cacheKeyPrimary, { ok: false, info: msg, at: Date.now() });
-    __setSynopsisModalContent({
-      title: normalizeName(entry.name),
-      meta: year ? ('Année: ' + year) : '',
-      overview: 'Synopsis indisponible (' + msg + ')',
-      foot: 'Source: TMDb',
-      posterUrl: ''
-    });
-  } finally {
-    __tmdbSynopsisBusyKey = '';
-  }
-}
-
-// Attache le click sur le TITRE pour ouvrir le synopsis — strictement sur la channelList (Films)
-function __attachSynopsisClickHandlersToChannelList() {
-  if (!channelListEl) return;
-  const items = Array.from(channelListEl.querySelectorAll('.channel-item'));
-
-  for (const item of items) {
-    // Larger click target than the title text: the whole title row
-    // (number + title + status).
-    const clickZone = item.querySelector('.channel-title-row') || item.querySelector('.channel-title');
-    if (!clickZone) continue;
-
-    // Idempotent binding on this DOM element
-    if (clickZone.dataset.synopsisBound === '1') continue;
-    clickZone.dataset.synopsisBound = '1';
-
-    const idx = parseInt(item.dataset.index || '-1', 10);
-    if (!(idx >= 0 && idx < channels.length)) continue;
-
-    // UX: make it clear this area is clickable
-    try {
-      clickZone.style.cursor = 'pointer';
-      // Make the click zone span the available width when possible
-      clickZone.style.width = '100%';
-    } catch {}
-
-    const handler = (ev) => {
-      // Prevent the parent item click (play) and open the synopsis instead
-      ev.preventDefault();
-      ev.stopPropagation();
-      const entry = channels[idx];
-      if (!entry) return;
-      openSynopsisFromEntry(entry);
-    };
-
-    clickZone.addEventListener('click', handler);
-
-    // Keyboard accessibility (desktop)
-    try {
-      clickZone.tabIndex = 0;
-      clickZone.setAttribute('role', 'button');
-      clickZone.addEventListener('keydown', (ev) => {
-        const k = ev.key || '';
-        if (k === 'Enter' || k === ' ') {
-          handler(ev);
-        }
-      });
-    } catch {}
-  }
-}
-
-
-
-
-
-
-
-
-
 
 
 let suspendRender = false;
